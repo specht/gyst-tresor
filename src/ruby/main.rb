@@ -124,7 +124,6 @@ class SetupDatabase
     ]
 
     INDEX_LIST = [
-        'Category/value',
     ]
 
     def setup(main)
@@ -157,6 +156,10 @@ class Main < Sinatra::Base
 
     def self.collect_data
         $neo4j.wait_for_neo4j
+        @@cache = {}
+        $neo4j.neo4j_query("MATCH (e:Entry) RETURN e.tag, e.value") do |row|
+            @@cache[row['e.tag']] = row['e.value']
+        end
     end
 
     def query_dashboard(path)
@@ -369,6 +372,7 @@ class Main < Sinatra::Base
         # Schuljahr:2022_23/Halbjahr:1/Fach:Ma/Email:max.mustermann@mail.gymnasiumsteglitz.de Note 3+
         require_dashboard_jwt!
         data = parse_request_data(:required_keys => [:path, :key, :value])
+        data[:value] = nil if data[:value].strip.empty?
         path = data[:path].strip
         tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
         email_hash = Digest::SHA1.hexdigest(@dashboard_user_email + SALT)[0, 16]
@@ -384,19 +388,7 @@ class Main < Sinatra::Base
             SET e.value = $value
             SET e.ts_updated = $ts
         END_OF_QUERY
-        parts = path.split('/')
-        parts.each do |part|
-            sub_parts = part.split(':')
-            assert(sub_parts.size == 2)
-            cat_key = sub_parts[0].downcase.capitalize
-            cat_value = sub_parts[1]
-            cat_value_hash = Digest::SHA1.hexdigest(cat_value + SALT)[0, 16]
-            neo4j_query(<<~END_OF_QUERY, :tag => tag, :value => cat_value_hash)
-                MATCH (e:Entry {tag: $tag})
-                MERGE (c:Category:#{cat_key} {value: $value})
-                MERGE (e)-[:BELONGS_TO]-(c);
-            END_OF_QUERY
-        end
+        @@cache[tag] = data[:value]
     end
 
     post '/jwt/get' do
@@ -404,37 +396,25 @@ class Main < Sinatra::Base
         data = parse_request_data(:required_keys => [:path, :key])
         path = data[:path].strip
         tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
-        value = nil
-        begin
-            value = neo4j_query_expect_one(<<~END_OF_QUERY, :tag => tag)['value']
-                MATCH (e:Entry {tag: $tag})
-                RETURN e.value AS value;
-            END_OF_QUERY
-        rescue
-        end
+        value = @@cache[tag]
         respond(:value => value)
     end
 
-    def recurse_path_array(paths, path_array, prefix = [])
+    def recurse_path_array(path_array, prefix = [], index_prefix = [], &block)
         if path_array.empty?
-            paths << prefix.join('/')
+            yield prefix.join('/'), index_prefix
             return
         end
         path_entry = path_array[0]
         key = path_entry[0]
         values = path_entry[1]
         values = [values] unless values.is_a? Array
-        values.each do |value|
-            recurse_path_array(paths, path_array[1, path_array.size - 1], prefix + ["#{key}:#{value}"])
+        values.each.with_index do |value, i|
+            recurse_path_array(path_array[1, path_array.size - 1], prefix + ["#{key}:#{value}"], index_prefix + [i], &block)
         end
     end
 
     post '/jwt/get_many' do
-        # 'Schuljahr:2022_23/Halbjahr:1/Fach:De/Email:elli.mustermann@mail.gymnasiumsteglitz.de'
-        # - ['Schuljahr', '2022_23']
-        # - ['Halbjahr', '1']
-        # - ['Fach', 'De']
-        # - ['Email', ['elli.mustermann@...', 'max.mustermann@...']]
         require_dashboard_jwt!
         data = parse_request_data(
             :required_keys => [:path_array, :key],
@@ -442,21 +422,19 @@ class Main < Sinatra::Base
             :max_body_length => 1024 * 1024,
             :max_string_length => 1024 * 1024,
         )
-        paths = []
-        recurse_path_array(paths, data[:path_array])
-        results = {}
-        paths.each do |path|
-            tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
-            value = nil
-            begin
-                value = neo4j_query_expect_one(<<~END_OF_QUERY, :tag => tag)['value']
-                    MATCH (e:Entry {tag: $tag})
-                    RETURN e.value AS value;
-                END_OF_QUERY
-            rescue
+        result_array = []
+        recurse_path_array(data[:path_array]) do |path, indices|
+            p0 = result_array
+            p = result_array
+            indices.each do |i|
+                p0 = p
+                p[i] ||= []
+                p = p[i]
             end
-            results[path] = value
+            tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
+            value = @@cache[tag]
+            p0[indices.last] = value
         end
-        respond(:results => results)
+        respond(:results => result_array)
     end
 end
