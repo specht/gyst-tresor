@@ -249,7 +249,7 @@ class Main < Sinatra::Base
         if DEVELOPMENT
             response.headers["Access-Control-Allow-Origin"] = "http://localhost:8025"
         else
-            if request.path[0, 5] == "/jwt/"
+            if request.path[0, 5] == "/jwt/" || request.path[0, 8] == '/public/'
                 response.headers["Access-Control-Allow-Origin"] = "https://dashboard.gymnasiumsteglitz.de"
             end
         end
