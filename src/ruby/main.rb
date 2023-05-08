@@ -374,8 +374,8 @@ class Main < Sinatra::Base
         data = parse_request_data(:required_keys => [:path, :key, :value])
         data[:value] = nil if data[:value].strip.empty?
         path = data[:path].strip
-        tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
-        email_hash = Digest::SHA1.hexdigest(@dashboard_user_email + SALT)[0, 16]
+        tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT).to_i(16).to_s(36)
+        email_hash = Digest::SHA1.hexdigest(@dashboard_user_email + SALT).to_i(16).to_s(36)
         neo4j_query(<<~END_OF_QUERY, :email => email_hash)
             MERGE (u:User {email: $email});
         END_OF_QUERY
@@ -395,7 +395,7 @@ class Main < Sinatra::Base
         require_dashboard_jwt!
         data = parse_request_data(:required_keys => [:path, :key])
         path = data[:path].strip
-        tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
+        tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT).to_i(16).to_s(36)
         value = @@cache[tag]
         respond(:value => value)
     end
@@ -419,8 +419,8 @@ class Main < Sinatra::Base
         data = parse_request_data(
             :required_keys => [:path_arrays, :key],
             :types => {:path_arrays => Array},
-            :max_body_length => 1024 * 1024,
-            :max_string_length => 1024 * 1024,
+            :max_body_length => 10 * 1024 * 1024,
+            :max_string_length => 10 * 1024 * 1024,
         )
         result_arrays = []
         data[:path_arrays].each do |array|
@@ -433,7 +433,7 @@ class Main < Sinatra::Base
                     p[i] ||= []
                     p = p[i]
                 end
-                tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
+                tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT).to_i(16).to_s(36)
                 value = @@cache[tag]
                 p0[indices.last] = value
             end
