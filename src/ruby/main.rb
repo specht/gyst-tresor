@@ -374,8 +374,8 @@ class Main < Sinatra::Base
         data = parse_request_data(:required_keys => [:path, :key, :value])
         data[:value] = nil if data[:value].strip.empty?
         path = data[:path].strip
-        tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT).to_i(16).to_s(36)
-        email_hash = Digest::SHA1.hexdigest(@dashboard_user_email + SALT).to_i(16).to_s(36)
+        tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
+        email_hash = Digest::SHA1.hexdigest(@dashboard_user_email + SALT)[0, 16]
         neo4j_query(<<~END_OF_QUERY, :email => email_hash)
             MERGE (u:User {email: $email});
         END_OF_QUERY
