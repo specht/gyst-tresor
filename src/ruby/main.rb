@@ -441,4 +441,33 @@ class Main < Sinatra::Base
         end
         respond(:results => result_arrays)
     end
+
+    post '/jwt/get_many_present' do
+        require_dashboard_jwt!
+        data = parse_request_data(
+            :required_keys => [:path_arrays, :key],
+            :types => {:path_arrays => Array},
+            :max_body_length => 10 * 1024 * 1024,
+            :max_string_length => 10 * 1024 * 1024,
+        )
+        result_arrays = []
+        data[:path_arrays].each do |array|
+            result_array = []
+            recurse_path_array(array) do |path, indices|
+                p0 = result_array
+                p = result_array
+                indices.each do |i|
+                    p0 = p
+                    p[i] ||= []
+                    p = p[i]
+                end
+                tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT).to_i(16).to_s(36)
+                value = @@cache[tag]
+                p0[indices.last] = value.nil? ? false : true
+            end
+            result_arrays << result_array
+        end
+        respond(:results => result_arrays)
+    end
+
 end
