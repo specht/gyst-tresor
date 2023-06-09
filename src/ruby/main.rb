@@ -395,7 +395,7 @@ class Main < Sinatra::Base
         require_dashboard_jwt!
         data = parse_request_data(:required_keys => [:path, :key])
         path = data[:path].strip
-        tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT).to_i(16).to_s(36)
+        tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
         value = @@cache[tag]
         respond(:value => value)
     end
@@ -433,7 +433,7 @@ class Main < Sinatra::Base
                     p[i] ||= []
                     p = p[i]
                 end
-                tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT).to_i(16).to_s(36)
+                tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
                 value = @@cache[tag]
                 p0[indices.last] = value
             end
