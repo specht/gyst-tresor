@@ -461,7 +461,7 @@ class Main < Sinatra::Base
                     p[i] ||= []
                     p = p[i]
                 end
-                tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT).to_i(16).to_s(36)
+                tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
                 value = @@cache[tag]
                 p0[indices.last] = value.nil? ? false : true
             end
