@@ -391,6 +391,37 @@ class Main < Sinatra::Base
         @@cache[tag] = data[:value]
     end
 
+    post '/jwt/toggle' do
+        require_dashboard_jwt!
+        data = parse_request_data(:required_keys => [:path, :key])
+        path = data[:path].strip
+        tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
+        email_hash = Digest::SHA1.hexdigest(@dashboard_user_email + SALT)[0, 16]
+        neo4j_query(<<~END_OF_QUERY, :email => email_hash)
+            MERGE (u:User {email: $email});
+        END_OF_QUERY
+        values = neo4j_query(<<~END_OF_QUERY, :tag => tag).map { |x| x['value'] }
+            MATCH (e:Entry {tag: $tag})
+            RETURN COALESCE(e.value, FALSE) AS value;
+        END_OF_QUERY
+        value = false
+        if values.size > 0
+            value = values.first
+        end
+        value = !value
+        neo4j_query(<<~END_OF_QUERY, :email => email_hash, :tag => tag, :key => data[:key], :value => value, :ts => Time.now.to_i)
+            MATCH (u:User {email: $email})
+            MERGE (e:Entry {tag: $tag})
+            CREATE (u)-[r:UPDATED]->(e)
+            SET r.ts = $ts
+            SET r.value = $value
+            SET e.value = $value
+            SET e.ts_updated = $ts
+        END_OF_QUERY
+        @@cache[tag] = value
+        respond(:value => value)
+    end
+
     post '/jwt/get' do
         require_dashboard_jwt!
         data = parse_request_data(:required_keys => [:path, :key])
