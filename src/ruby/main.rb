@@ -4,9 +4,6 @@ require "json"
 require "jwt"
 require "mail"
 require "neo4j_bolt"
-require 'prawn/qrcode'
-require 'prawn/measurement_extensions'
-require 'prawn-styled-text'
 require "sinatra/base"
 require "sinatra/cookies"
 require 'curl'
@@ -20,35 +17,6 @@ $VERBOSE = nil
 require "./credentials.rb"
 $VERBOSE = warn_level
 DASHBOARD_SERVICE = ENV["DASHBOARD_SERVICE"]
-
-class Prawn::Document
-    def elide_string(s, width, style = {}, suffix = '…')
-        return '' if width <= 0
-        return s if width_of(s, style) <= width
-        suffix_width = width_of(suffix, style)
-        width -= suffix_width
-        length = s.size
-        i = 0
-        l = s.size
-        r = l
-        while width_of(s[0, l], style) > width
-            r = l
-            l /= 2
-        end
-        i = 0
-        while l < r - 1 do
-            m = (l + r) / 2
-            if width_of(s[0, m], style) > width
-                r = m
-            else
-                l = m
-            end
-            i += 1
-            break if (i > 1000)
-        end
-        s[0, l].strip + suffix
-    end
-end
 
 def debug(message, index = 0)
     index = 0
@@ -157,9 +125,25 @@ class Main < Sinatra::Base
     def self.collect_data
         $neo4j.wait_for_neo4j
         @@cache = {}
+        @@cache_pre = {}
+        @@cache_post = {}
+        n = 0
         $neo4j.neo4j_query("MATCH (e:Entry) RETURN e.tag, e.value") do |row|
             @@cache[row['e.tag']] = row['e.value']
+            n += 1
         end
+        STDERR.puts "Got #{n} entries"
+        n = 0
+        $neo4j.neo4j_query("MATCH (:User)-[r:UPDATED]->(e:Entry) RETURN e.tag, r.ts, r.value ORDER BY r.ts;") do |row|
+            ts = row['r.ts']
+            if ts < CUTOFF_TIMESTAMP
+                @@cache_pre[row['e.tag']] = row['r.value']
+            else
+                @@cache_post[row['e.tag']] = row['r.value']
+            end
+            n += 1
+        end
+        STDERR.puts "Got #{n} updates, #{@@cache_pre.size} pre, #{@@cache_post.size} post"
     end
 
     def query_dashboard(path)
@@ -181,6 +165,7 @@ class Main < Sinatra::Base
         end
         @@dashboard_etag = nil
         @@bib_label_print_queue = []
+        STDERR.puts "Launching with cutoff at #{CUTOFF_TIMESTAMP} (#{Time.at(CUTOFF_TIMESTAMP).strftime('%Y-%m-%d %H:%M:%S')})"
         if ["thin", "rackup"].include?(File.basename($0))
             debug("Server is up and running!")
         end
@@ -379,7 +364,8 @@ class Main < Sinatra::Base
         neo4j_query(<<~END_OF_QUERY, :email => email_hash)
             MERGE (u:User {email: $email});
         END_OF_QUERY
-        neo4j_query(<<~END_OF_QUERY, :email => email_hash, :tag => tag, :key => data[:key], :value => data[:value], :ts => Time.now.to_i)
+        ts = Time.now.to_i
+        neo4j_query(<<~END_OF_QUERY, :email => email_hash, :tag => tag, :key => data[:key], :value => data[:value], :ts => ts)
             MATCH (u:User {email: $email})
             MERGE (e:Entry {tag: $tag})
             CREATE (u)-[r:UPDATED]->(e)
@@ -389,6 +375,12 @@ class Main < Sinatra::Base
             SET e.ts_updated = $ts
         END_OF_QUERY
         @@cache[tag] = data[:value]
+        if ts < CUTOFF_TIMESTAMP
+            @@cache_pre[tag] = data[:value]
+        else
+            @@cache_post[tag] = data[:value]
+        end
+        respond(:value => @@cache[tag], :value_pre => @@cache_pre[tag])
     end
 
     post '/jwt/toggle' do
@@ -409,7 +401,8 @@ class Main < Sinatra::Base
             value = values.first
         end
         value = !value
-        neo4j_query(<<~END_OF_QUERY, :email => email_hash, :tag => tag, :key => data[:key], :value => value, :ts => Time.now.to_i)
+        ts = Time.now.to_i
+        neo4j_query(<<~END_OF_QUERY, :email => email_hash, :tag => tag, :key => data[:key], :value => value, :ts => ts)
             MATCH (u:User {email: $email})
             MERGE (e:Entry {tag: $tag})
             CREATE (u)-[r:UPDATED]->(e)
@@ -419,6 +412,11 @@ class Main < Sinatra::Base
             SET e.ts_updated = $ts
         END_OF_QUERY
         @@cache[tag] = value
+        if ts < CUTOFF_TIMESTAMP
+            @@cache_pre[tag] = data[:value]
+        else
+            @@cache_post[tag] = data[:value]
+        end
         respond(:value => value)
     end
 
@@ -495,6 +493,33 @@ class Main < Sinatra::Base
                 tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
                 value = @@cache[tag]
                 p0[indices.last] = value.nil? ? false : true
+            end
+            result_arrays << result_array
+        end
+        respond(:results => result_arrays)
+    end
+
+    post '/jwt/get_many_cutoff' do
+        require_dashboard_jwt!
+        data = parse_request_data(
+            :required_keys => [:path_arrays, :key],
+            :types => {:path_arrays => Array},
+            :max_body_length => 10 * 1024 * 1024,
+            :max_string_length => 10 * 1024 * 1024,
+        )
+        result_arrays = []
+        data[:path_arrays].each do |array|
+            result_array = []
+            recurse_path_array(array) do |path, indices|
+                p0 = result_array
+                p = result_array
+                indices.each do |i|
+                    p0 = p
+                    p[i] ||= []
+                    p = p[i]
+                end
+                tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
+                p0[indices.last] = [@@cache[tag], @@cache_pre[tag]]
             end
             result_arrays << result_array
         end
