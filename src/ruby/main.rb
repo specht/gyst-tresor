@@ -356,7 +356,7 @@ class Main < Sinatra::Base
     post '/jwt/store' do
         # Schuljahr:2022_23/Halbjahr:1/Fach:Ma/Email:max.mustermann@mail.gymnasiumsteglitz.de Note 3+
         require_dashboard_jwt!
-        data = parse_request_data(:required_keys => [:path, :key, :value])
+        data = parse_request_data(:required_keys => [:path, :key, :value], :max_string_length => 1024 * 16, :max_body_length => 1024 *16, :max_value_lengths  => {:value => 1024 * 16})
         data[:value] = nil if data[:value].strip.empty?
         path = data[:path].strip
         tag = Digest::SHA1.hexdigest(path + '/' + data[:key] + SALT)[0, 16]
