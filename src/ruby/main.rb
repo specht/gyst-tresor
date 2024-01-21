@@ -526,4 +526,22 @@ class Main < Sinatra::Base
         respond(:results => result_arrays)
     end
 
+    post '/jwt/get_many_tags' do
+        require_dashboard_jwt!
+        data = parse_request_data(
+            :required_keys => [:path_arrays, :key],
+            :types => {:path_arrays => Array},
+            :max_body_length => 10 * 1024 * 1024,
+            :max_string_length => 10 * 1024 * 1024,
+        )
+        result_hash = {}
+        data[:path_arrays].each do |array|
+            recurse_path_array(array) do |path, indices|
+                s = path + '/' + data[:key] + SALT
+                tag = Digest::SHA1.hexdigest(s)[0, 16]
+                result_hash[s] = tag
+            end
+        end
+        respond(:result_hash => result_hash)
+    end
 end
