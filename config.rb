@@ -165,4 +165,6 @@ FileUtils::mkpath(GEN_FILES_PATH)
 FileUtils::mkpath(NEO4J_DATA_PATH)
 FileUtils::mkpath(NEO4J_LOGS_PATH)
 
-system("docker-compose --project-name #{PROJECT_NAME} #{ARGV.map { |x| '"' + x + '"'}.join(' ')}")
+`docker compose 2> /dev/null`
+DOCKER_COMPOSE = ($? == 0) ? 'docker compose' : 'docker-compose'
+system("#{DOCKER_COMPOSE} --compatibility --project-name #{PROJECT_NAME} #{ARGV.map { |x| '"' + x + '"'}.join(' ')}")
