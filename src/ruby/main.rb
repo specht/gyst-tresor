@@ -1,4 +1,5 @@
 require "base64"
+require "date"
 require "digest"
 require "json"
 require "jwt"
@@ -127,6 +128,7 @@ class Main < Sinatra::Base
         @@cache = {}
         @@cache_pre = {}
         @@cache_post = {}
+        @@cutoff_timestamp = DateTime.parse(CUTOFF_TIMESTAMP).to_time.to_i
         n = 0
         $neo4j.neo4j_query("MATCH (e:Entry) RETURN e.tag, e.value") do |row|
             @@cache[row['e.tag']] = row['e.value']
@@ -136,7 +138,7 @@ class Main < Sinatra::Base
         n = 0
         $neo4j.neo4j_query("MATCH (:User)-[r:UPDATED]->(e:Entry) RETURN e.tag, r.ts, r.value ORDER BY r.ts;") do |row|
             ts = row['r.ts']
-            if ts < CUTOFF_TIMESTAMP
+            if ts < @@cutoff_timestamp
                 @@cache_pre[row['e.tag']] = row['r.value']
             else
                 @@cache_post[row['e.tag']] = row['r.value']
@@ -165,7 +167,7 @@ class Main < Sinatra::Base
         end
         @@dashboard_etag = nil
         @@bib_label_print_queue = []
-        STDERR.puts "Launching with cutoff at #{CUTOFF_TIMESTAMP} (#{Time.at(CUTOFF_TIMESTAMP).strftime('%Y-%m-%d %H:%M:%S')})"
+        STDERR.puts "Launching with cutoff at #{@@cutoff_timestamp} (#{Time.at(@@cutoff_timestamp).strftime('%Y-%m-%d %H:%M:%S')})"
         if ["thin", "rackup"].include?(File.basename($0))
             debug("Server is up and running!")
         end
@@ -375,7 +377,7 @@ class Main < Sinatra::Base
             SET e.ts_updated = $ts
         END_OF_QUERY
         @@cache[tag] = data[:value]
-        if ts < CUTOFF_TIMESTAMP
+        if ts < @@cutoff_timestamp
             @@cache_pre[tag] = data[:value]
         else
             @@cache_post[tag] = data[:value]
@@ -412,7 +414,7 @@ class Main < Sinatra::Base
             SET e.ts_updated = $ts
         END_OF_QUERY
         @@cache[tag] = value
-        if ts < CUTOFF_TIMESTAMP
+        if ts < @@cutoff_timestamp
             @@cache_pre[tag] = data[:value]
         else
             @@cache_post[tag] = data[:value]

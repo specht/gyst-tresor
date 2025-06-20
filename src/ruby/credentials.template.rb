@@ -11,4 +11,4 @@ WEB_ROOT = DEVELOPMENT ? 'http://localhost:8025' : "https://#{WEBSITE_HOST}"
 JWT_APPKEY_TRESOR = 'something'
 SALT = 'something else'
 
-CUTOFF_TIMESTAMP = 1737388800
+CUTOFF_TIMESTAMP = '2025-01-20T11:00:00'
